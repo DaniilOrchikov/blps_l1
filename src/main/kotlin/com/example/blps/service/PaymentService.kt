@@ -5,21 +5,24 @@ import com.example.blps.model.PaymentMethod
 import com.example.blps.model.PaymentStatus
 import com.example.blps.repository.PaymentRepository
 import org.springframework.stereotype.Service
+import org.springframework.transaction.support.TransactionTemplate
 import java.time.LocalDateTime
 
 @Service
 class PaymentService(
-    private val paymentRepository: PaymentRepository
+    private val paymentRepository: PaymentRepository,
+    private val txTemplate: TransactionTemplate
 ) {
-    fun createPayment(vacancyId: Long, amount: Double, paymentMethod: PaymentMethod): Payment {
-        val payment = Payment(
-            vacancyId = vacancyId,
-            amount = amount,
-            paymentMethod = paymentMethod
-        )
+    fun createPayment(vacancyId: Long, amount: Double, paymentMethod: PaymentMethod): Payment =
+        txTemplate.execute { _ ->
+            val payment = Payment(
+                vacancyId = vacancyId,
+                amount = amount,
+                paymentMethod = paymentMethod
+            )
 
-        return paymentRepository.save(payment)
-    }
+            paymentRepository.save(payment)
+        }!!
 
     fun getPaymentById(id: Long): Payment {
         return paymentRepository.findById(id).orElseThrow {
@@ -32,9 +35,11 @@ class PaymentService(
     }
 
     fun updatePaymentStatus(paymentId: Long, status: PaymentStatus) {
-        val payment = getPaymentById(paymentId)
-        payment.status = status
-        payment.processedAt = LocalDateTime.now()
-        paymentRepository.save(payment)
+        txTemplate.execute { _ ->
+            val payment = getPaymentById(paymentId)
+            payment.status = status
+            payment.processedAt = LocalDateTime.now()
+            paymentRepository.save(payment)
+        }
     }
 }

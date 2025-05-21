@@ -8,7 +8,6 @@ import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Service
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.TransactionDefinition
-import org.springframework.transaction.support.TransactionCallback
 import org.springframework.transaction.support.TransactionTemplate
 import java.time.LocalDateTime
 import java.time.temporal.ChronoUnit
@@ -27,7 +26,7 @@ class VacancyService(
     }
 
     private val readOnlyTransactionTemplate = TransactionTemplate(transactionManager).apply {
-        propagationBehavior = TransactionDefinition.PROPAGATION_SUPPORTS
+        propagationBehavior = TransactionDefinition.PROPAGATION_REQUIRED
         isReadOnly = true
     }
 

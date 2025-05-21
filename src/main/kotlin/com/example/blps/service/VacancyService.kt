@@ -6,6 +6,9 @@ import com.example.blps.model.*
 import com.example.blps.repository.VacancyRepository
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Service
+import org.springframework.transaction.PlatformTransactionManager
+import org.springframework.transaction.TransactionDefinition
+import org.springframework.transaction.support.TransactionCallback
 import org.springframework.transaction.support.TransactionTemplate
 import java.time.LocalDateTime
 import java.time.temporal.ChronoUnit
@@ -16,8 +19,27 @@ class VacancyService(
     private val paymentService: PaymentService,
     private val zarplataRuService: ZarplataRuService,
     private val paymentGateway: PaymentGateway,
-    private val txTemplate: TransactionTemplate
+    transactionManager: PlatformTransactionManager
 ) {
+    private val transactionTemplate = TransactionTemplate(transactionManager).apply {
+        propagationBehavior = TransactionDefinition.PROPAGATION_REQUIRED
+        timeout = 30
+    }
+
+    private val readOnlyTransactionTemplate = TransactionTemplate(transactionManager).apply {
+        propagationBehavior = TransactionDefinition.PROPAGATION_SUPPORTS
+        isReadOnly = true
+    }
+
+    private val serializableTransactionTemplate = TransactionTemplate(transactionManager).apply {
+        isolationLevel = TransactionDefinition.ISOLATION_SERIALIZABLE
+    }
+
+    private val batchTransactionTemplate = TransactionTemplate(transactionManager).apply {
+        propagationBehavior = TransactionDefinition.PROPAGATION_REQUIRES_NEW
+        timeout = 120
+    }
+
     companion object {
         private const val BASE_PROMOTION_SCORE = 100.0
         private const val BONUS = 100.0
@@ -25,21 +47,22 @@ class VacancyService(
     }
 
     fun createVacancy(vacancy: Vacancy): Vacancy =
-        txTemplate.execute { _ ->
+        transactionTemplate.execute { _ ->
             vacancyRepository.save(vacancy.apply {
                 status = VacancyStatus.DRAFT
                 createdAt = LocalDateTime.now()
             })
         }!!
 
-    fun getVacancyById(id: Long): Vacancy {
-        return vacancyRepository.findById(id).orElseThrow {
-            RuntimeException("Vacancy not found with id: $id")
-        }
-    }
+    fun getVacancyById(id: Long): Vacancy =
+        readOnlyTransactionTemplate.execute { _ ->
+            vacancyRepository.findById(id).orElseThrow {
+                RuntimeException("Vacancy not found with id: $id")
+            }
+        }!!
 
     fun prepareForPublishing(vacancyId: Long, publishRequest: PublishRequest): Vacancy =
-        txTemplate.execute { _ ->
+        transactionTemplate.execute { _ ->
             val vacancy = getVacancyById(vacancyId).apply {
                 publishTime = publishRequest.publishTime
                 publicationType = publishRequest.publicationType
@@ -51,7 +74,7 @@ class VacancyService(
         }!!
 
     fun processPayment(vacancyId: Long, paymentMethod: PaymentMethod): Payment =
-        txTemplate.execute { _ ->
+        serializableTransactionTemplate.execute { _ ->
             val vacancy = getVacancyById(vacancyId)
             require(vacancy.status == VacancyStatus.PENDING_PAYMENT) {
                 "Vacancy is not in PENDING_PAYMENT status"
@@ -90,7 +113,7 @@ class VacancyService(
 
     @Scheduled(fixedRate = 60000)
     fun publishScheduledVacancies() {
-        txTemplate.execute { _ ->
+        transactionTemplate.execute { _ ->
             val now = LocalDateTime.now()
             vacancyRepository.findByStatus(VacancyStatus.PENDING_PAYMENT)
                 .filter { it.publishTime == null || it.publishTime!!.isBefore(now) }
@@ -104,7 +127,7 @@ class VacancyService(
 
     @Scheduled(fixedRate = 3600000)
     fun expireOldVacancies() {
-        txTemplate.execute { _ ->
+        transactionTemplate.execute { _ ->
             val now = LocalDateTime.now()
             vacancyRepository.findByStatus(VacancyStatus.PUBLISHED)
                 .filter { it.expiresAt != null && it.expiresAt!!.isBefore(now) }
@@ -115,25 +138,27 @@ class VacancyService(
         }
     }
 
-    fun publishVacancy(vacancy: Vacancy): Vacancy {
-        require(vacancy.status == VacancyStatus.PENDING_PAYMENT) {
-            "Cannot publish vacancy with status ${vacancy.status}"
-        }
-
-        val actualPublishTime = vacancy.publishTime ?: LocalDateTime.now()
-
-        return vacancy.apply {
-            publishedAt = actualPublishTime
-            expiresAt = calculateExpirationDate(actualPublishTime)
-            status = VacancyStatus.PUBLISHED
-            promotionScore = calculateInitialPromotionScore(vacancy)
-            lastPromotionUpdate = actualPublishTime
-
-            if (publishOnZarplataRu) {
-                zarplataRuService.publishVacancy(this)
+    fun publishVacancy(vacancy: Vacancy): Vacancy =
+        transactionTemplate.execute { _ ->
+            require(vacancy.status == VacancyStatus.PENDING_PAYMENT) {
+                "Cannot publish vacancy with status ${vacancy.status}"
             }
-        }.let { vacancyRepository.save(it) }
-    }
+
+            val actualPublishTime = vacancy.publishTime ?: LocalDateTime.now()
+
+            vacancy.apply {
+                publishedAt = actualPublishTime
+                expiresAt = calculateExpirationDate(actualPublishTime)
+                status = VacancyStatus.PUBLISHED
+                promotionScore = calculateInitialPromotionScore(vacancy)
+                lastPromotionUpdate = actualPublishTime
+
+                if (publishOnZarplataRu) {
+                    zarplataRuService.publishVacancy(this)
+                }
+            }.let { vacancyRepository.save(it) }
+        }!!
+
 
     private fun calculateInitialPromotionScore(vacancy: Vacancy): Double {
         return when (vacancy.publicationType) {
@@ -149,7 +174,7 @@ class VacancyService(
 
     @Scheduled(cron = "0 0 * * * ?")
     fun updatePromotionScores() {
-        txTemplate.execute { _ ->
+        batchTransactionTemplate.execute { _ ->
             val now = LocalDateTime.now()
             vacancyRepository.findByStatus(VacancyStatus.PUBLISHED).forEach { vacancy ->
                 val daysSincePublish = ChronoUnit.DAYS.between(vacancy.publishedAt, now)
@@ -190,7 +215,7 @@ class VacancyService(
 
     @Scheduled(cron = "0 0 3 * * ?") // Ежедневно
     fun promoteStandardPlusVacancies() {
-        txTemplate.execute { _ ->
+        transactionTemplate.execute { _ ->
             val now = LocalDateTime.now()
             vacancyRepository.findByPublicationTypeAndStatus(
                 PublicationType.STANDARD_PLUS,
@@ -207,14 +232,17 @@ class VacancyService(
         }
     }
 
-    fun getAllVacancies(): List<VacancyDto> {
-        return vacancyRepository.findAllByOrderByPromotionScoreDesc()
-            .map { it.toDto() }
-    }
+    fun getAllVacancies(): List<VacancyDto> =
+        readOnlyTransactionTemplate.execute { _ ->
+            vacancyRepository.findAllByOrderByPromotionScoreDesc()
+                .map { it.toDto() }
+        }!!
 
-    fun isVacancyPublished(vacancyId: Long): Boolean {
-        return getVacancyById(vacancyId).status == VacancyStatus.PUBLISHED
-    }
+    fun getPublishedVacancies(): List<VacancyDto> =
+        readOnlyTransactionTemplate.execute { _ ->
+            vacancyRepository.findByStatus(VacancyStatus.PUBLISHED)
+                .map { it.toDto() }
+        }!!
 }
 
 

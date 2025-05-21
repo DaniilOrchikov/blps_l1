@@ -5,16 +5,23 @@ import com.example.blps.model.PaymentMethod
 import com.example.blps.model.PaymentStatus
 import com.example.blps.repository.PaymentRepository
 import org.springframework.stereotype.Service
+import org.springframework.transaction.PlatformTransactionManager
+import org.springframework.transaction.TransactionDefinition
 import org.springframework.transaction.support.TransactionTemplate
 import java.time.LocalDateTime
 
 @Service
 class PaymentService(
     private val paymentRepository: PaymentRepository,
-    private val txTemplate: TransactionTemplate
+    transactionManager: PlatformTransactionManager
 ) {
+    private val transactionTemplate = TransactionTemplate(transactionManager).apply {
+        propagationBehavior = TransactionDefinition.PROPAGATION_REQUIRED
+        timeout = 30
+    }
+
     fun createPayment(vacancyId: Long, amount: Double, paymentMethod: PaymentMethod): Payment =
-        txTemplate.execute { _ ->
+        transactionTemplate.execute { _ ->
             val payment = Payment(
                 vacancyId = vacancyId,
                 amount = amount,
@@ -35,7 +42,7 @@ class PaymentService(
     }
 
     fun updatePaymentStatus(paymentId: Long, status: PaymentStatus) {
-        txTemplate.execute { _ ->
+        transactionTemplate.execute { _ ->
             val payment = getPaymentById(paymentId)
             payment.status = status
             payment.processedAt = LocalDateTime.now()

@@ -1,6 +1,6 @@
 package com.example.blps.service
 
-import com.example.blps.controller.PublishRequest
+import com.example.blps.controller.PublishAndPayRequest
 import com.example.blps.dto.VacancyDto
 import com.example.blps.model.*
 import com.example.blps.repository.VacancyRepository
@@ -60,41 +60,130 @@ class VacancyService(
             }
         }!!
 
-    fun prepareForPublishing(vacancyId: Long, publishRequest: PublishRequest): Vacancy =
-        transactionTemplate.execute { _ ->
-            val vacancy = getVacancyById(vacancyId).apply {
-                publishTime = publishRequest.publishTime
-                publicationType = publishRequest.publicationType
-                publishOnZarplataRu = publishRequest.publishOnZarplataRu
-                cities = publishRequest.cities
+//    fun prepareForPublishing(vacancyId: Long, publishRequest: PublishRequest): Vacancy =
+//        transactionTemplate.execute { _ ->
+//            val vacancy = getVacancyById(vacancyId).apply {
+//                publishTime = publishRequest.publishTime
+//                publicationType = publishRequest.publicationType
+//                publishOnZarplataRu = publishRequest.publishOnZarplataRu
+//                cities = publishRequest.cities
+//                status = VacancyStatus.PENDING_PAYMENT
+//            }
+//            vacancyRepository.save(vacancy)
+//        }!!
+//
+//    fun processPayment(vacancyId: Long, paymentMethod: PaymentMethod): Payment =
+//        serializableTransactionTemplate.execute { _ ->
+//            val vacancy = getVacancyById(vacancyId)
+//            require(vacancy.status == VacancyStatus.PENDING_PAYMENT) {
+//                "Vacancy is not in PENDING_PAYMENT status"
+//            }
+//
+//            val amount = calculateCost(vacancy)
+//            val payment = paymentService.createPayment(vacancyId, amount, paymentMethod)
+//
+//            if (paymentMethod == PaymentMethod.PERSONAL_ACCOUNT) {
+//                paymentGateway.processWithPersonalAccount(payment.id, amount)
+//            } else {
+//                paymentGateway.processWithBankCard(payment.id, amount)
+//            }
+//
+//            // Автоматическая публикация, если не указано отложенное время
+//            if (vacancy.publishTime == null || vacancy.publishTime!!.isBefore(LocalDateTime.now())) {
+//                publishVacancy(vacancy)
+//            }
+//
+//            payment
+//        }!!
+
+    fun publishWithPayment(vacancyId: Long, req: PublishAndPayRequest): Vacancy {
+        val paidVacancy = transactionTemplate.execute { _ ->
+
+            val vacancy = getVacancyById(vacancyId)
+            require(vacancy.status == VacancyStatus.DRAFT) {
+                "Vacancy must be in DRAFT status"
+            }
+
+            vacancy.apply {
+                publishTime = req.publishTime
+                publicationType = req.publicationType
+                publishOnZarplataRu = req.publishOnZarplataRu
+                cities = req.cities.toMutableList()
                 status = VacancyStatus.PENDING_PAYMENT
             }
+
+            val price = calculateCost(vacancy)
+            val payment = paymentService.createPayment(
+                vacancyId, price, req.paymentMethod
+            )
+
+            val payOk = when (req.paymentMethod) {
+                PaymentMethod.BANK_CARD -> paymentGateway.processWithBankCard(payment.id, price)
+                PaymentMethod.PERSONAL_ACCOUNT -> paymentGateway.processWithPersonalAccount(payment.id, price)
+            }
+
+            if (!payOk)
+                throw RuntimeException("Payment failed")
+
+            vacancy.status = VacancyStatus.PAID
             vacancyRepository.save(vacancy)
         }!!
 
-    fun processPayment(vacancyId: Long, paymentMethod: PaymentMethod): Payment =
-        serializableTransactionTemplate.execute { _ ->
-            val vacancy = getVacancyById(vacancyId)
-            require(vacancy.status == VacancyStatus.PENDING_PAYMENT) {
-                "Vacancy is not in PENDING_PAYMENT status"
+        return try {
+            if (paidVacancy.publishTime == null ||
+                paidVacancy.publishTime!!.isBefore(LocalDateTime.now())
+            )
+                publishPaidVacancy(paidVacancy)
+            else
+                paidVacancy
+        } catch (ex: Exception) {
+            rollbackAfterPublishFail(paidVacancy.id)
+            throw ex
+        }
+    }
+
+    private fun publishPaidVacancy(vacancy: Vacancy): Vacancy =
+        transactionTemplate.execute { _ ->
+
+            require(vacancy.status == VacancyStatus.PAID) {
+                "Vacancy must be PAID before publishing"
             }
 
-            val amount = calculateCost(vacancy)
-            val payment = paymentService.createPayment(vacancyId, amount, paymentMethod)
+            val publishMoment = vacancy.publishTime ?: LocalDateTime.now()
 
-            if (paymentMethod == PaymentMethod.PERSONAL_ACCOUNT) {
-                paymentGateway.processWithPersonalAccount(payment.id, amount)
-            } else {
-                paymentGateway.processWithBankCard(payment.id, amount)
+            vacancy.apply {
+                publishedAt = publishMoment
+                expiresAt = calculateExpirationDate(publishMoment)
+                status = VacancyStatus.PUBLISHED
+                promotionScore = calculateInitialPromotionScore(this)
+                lastPromotionUpdate = publishMoment
             }
 
-            // Автоматическая публикация, если не указано отложенное время
-            if (vacancy.publishTime == null || vacancy.publishTime!!.isBefore(LocalDateTime.now())) {
-                publishVacancy(vacancy)
+            if (vacancy.publishOnZarplataRu) {
+                val ok = zarplataRuService.publishVacancy(vacancy)
+                if (!ok) throw RuntimeException("Zarplata.ru returned false")
             }
 
-            payment
+            vacancyRepository.save(vacancy)
         }!!
+
+    private fun rollbackAfterPublishFail(vacancyId: Long) {
+        transactionTemplate.execute { _ ->
+            val vacancy = getVacancyById(vacancyId)
+            vacancy.apply {
+                status = VacancyStatus.DRAFT
+                publishTime = null
+                publishOnZarplataRu = false
+                cities.clear()
+            }
+            vacancyRepository.save(vacancy)
+
+            paymentService.getLastPaymentForVacancy(vacancyId)?.let {
+                if (it.status == PaymentStatus.COMPLETED)
+                    paymentGateway.refund(it.id)
+            }
+        }
+    }
 
     fun calculateCost(vacancy: Vacancy): Double {
         var basePrice = when (vacancy.publicationType) {
@@ -110,19 +199,22 @@ class VacancyService(
         return basePrice * vacancy.cities.size
     }
 
-    @Scheduled(fixedRate = 60000)
+    @Scheduled(fixedRate = 60_000)
     fun publishScheduledVacancies() {
         transactionTemplate.execute { _ ->
             val now = LocalDateTime.now()
-            vacancyRepository.findByStatus(VacancyStatus.PENDING_PAYMENT)
-                .filter { it.publishTime == null || it.publishTime!!.isBefore(now) }
-                .forEach { vac ->
-                    paymentService.getLastPaymentForVacancy(vac.id)
-                        ?.takeIf { it.status == PaymentStatus.COMPLETED }
-                        ?.let { publishVacancy(vac) }
+            vacancyRepository.findByStatus(VacancyStatus.PAID)
+                .filter { it.publishTime != null && it.publishTime!!.isBefore(now) }
+                .forEach {
+                    try {
+                        publishPaidVacancy(it)
+                    } catch (ex: Exception) {
+                        rollbackAfterPublishFail(it.id)
+                    }
                 }
         }
     }
+
 
     @Scheduled(fixedRate = 3600000)
     fun expireOldVacancies() {
@@ -137,26 +229,26 @@ class VacancyService(
         }
     }
 
-    fun publishVacancy(vacancy: Vacancy): Vacancy =
-        transactionTemplate.execute { _ ->
-            require(vacancy.status == VacancyStatus.PENDING_PAYMENT) {
-                "Cannot publish vacancy with status ${vacancy.status}"
-            }
-
-            val actualPublishTime = vacancy.publishTime ?: LocalDateTime.now()
-
-            vacancy.apply {
-                publishedAt = actualPublishTime
-                expiresAt = calculateExpirationDate(actualPublishTime)
-                status = VacancyStatus.PUBLISHED
-                promotionScore = calculateInitialPromotionScore(vacancy)
-                lastPromotionUpdate = actualPublishTime
-
-                if (publishOnZarplataRu) {
-                    zarplataRuService.publishVacancy(this)
-                }
-            }.let { vacancyRepository.save(it) }
-        }!!
+//    fun publishVacancy(vacancy: Vacancy): Vacancy =
+//        transactionTemplate.execute { _ ->
+//            require(vacancy.status == VacancyStatus.PENDING_PAYMENT) {
+//                "Cannot publish vacancy with status ${vacancy.status}"
+//            }
+//
+//            val actualPublishTime = vacancy.publishTime ?: LocalDateTime.now()
+//
+//            vacancy.apply {
+//                publishedAt = actualPublishTime
+//                expiresAt = calculateExpirationDate(actualPublishTime)
+//                status = VacancyStatus.PUBLISHED
+//                promotionScore = calculateInitialPromotionScore(vacancy)
+//                lastPromotionUpdate = actualPublishTime
+//
+//                if (publishOnZarplataRu) {
+//                    zarplataRuService.publishVacancy(this)
+//                }
+//            }.let { vacancyRepository.save(it) }
+//        }!!
 
 
     private fun calculateInitialPromotionScore(vacancy: Vacancy): Double {

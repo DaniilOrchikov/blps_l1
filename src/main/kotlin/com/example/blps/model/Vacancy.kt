@@ -53,7 +53,7 @@ data class Vacancy(
     var publishOnZarplataRu: Boolean = false,
 
     @ElementCollection
-    var cities: List<String> = mutableListOf(),
+    var cities: MutableList<String> = mutableListOf(),
 
     @Enumerated(EnumType.STRING)
     var status: VacancyStatus = VacancyStatus.DRAFT,
@@ -87,5 +87,5 @@ enum class PublicationType {
 }
 
 enum class VacancyStatus {
-    DRAFT, PENDING_PAYMENT, PUBLISHED, EXPIRED
+    DRAFT, PENDING_PAYMENT, PAID, PUBLISHED, EXPIRED
 }

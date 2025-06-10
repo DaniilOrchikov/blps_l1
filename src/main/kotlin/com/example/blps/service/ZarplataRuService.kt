@@ -7,7 +7,6 @@ import org.springframework.stereotype.Service
 class ZarplataRuService {
     fun publishVacancy(vacancy: Vacancy): Boolean {
         // Заглушка для интеграции с Зарплата.ру
-        println("Publishing vacancy ${vacancy.id} to Zarplata.ru")
         return true
     }
 }

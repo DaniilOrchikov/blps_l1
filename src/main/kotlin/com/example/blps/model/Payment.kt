@@ -18,9 +18,9 @@ data class Payment(
 )
 
 enum class PaymentMethod {
-        BANK_CARD, PERSONAL_ACCOUNT
+    BANK_CARD, PERSONAL_ACCOUNT
 }
 
 enum class PaymentStatus {
-    PENDING, COMPLETED, FAILED
+    PENDING, COMPLETED, FAILED, REFUNDED
 }

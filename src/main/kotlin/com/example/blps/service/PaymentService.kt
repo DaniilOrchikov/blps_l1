@@ -49,4 +49,12 @@ class PaymentService(
             paymentRepository.save(payment)
         }
     }
+
+    fun refundLastPaymentForVacancy(vacancyId: Long) {
+        val payment = getLastPaymentForVacancy(vacancyId)
+            ?: return
+        if (payment.status == PaymentStatus.COMPLETED) {
+            updatePaymentStatus(payment.id, PaymentStatus.REFUNDED)
+        }
+    }
 }

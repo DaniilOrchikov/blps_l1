@@ -12,6 +12,9 @@ data class Payment(
     var vacancyId: Long,
     var amount: Double,
     var paymentMethod: PaymentMethod,
+
+    var username: String,
+
     var status: PaymentStatus = PaymentStatus.PENDING,
     var createdAt: LocalDateTime = LocalDateTime.now(),
     var processedAt: LocalDateTime? = null

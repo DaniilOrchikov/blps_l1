@@ -20,12 +20,13 @@ class PaymentService(
         timeout = 30
     }
 
-    fun createPayment(vacancyId: Long, amount: Double, paymentMethod: PaymentMethod): Payment =
+    fun createPayment(vacancyId: Long, amount: Double, paymentMethod: PaymentMethod, username: String): Payment =
         transactionTemplate.execute { _ ->
             val payment = Payment(
                 vacancyId = vacancyId,
                 amount = amount,
-                paymentMethod = paymentMethod
+                paymentMethod = paymentMethod,
+                username = username
             )
 
             paymentRepository.save(payment)
@@ -47,14 +48,6 @@ class PaymentService(
             payment.status = status
             payment.processedAt = LocalDateTime.now()
             paymentRepository.save(payment)
-        }
-    }
-
-    fun refundLastPaymentForVacancy(vacancyId: Long) {
-        val payment = getLastPaymentForVacancy(vacancyId)
-            ?: return
-        if (payment.status == PaymentStatus.COMPLETED) {
-            updatePaymentStatus(payment.id, PaymentStatus.REFUNDED)
         }
     }
 }

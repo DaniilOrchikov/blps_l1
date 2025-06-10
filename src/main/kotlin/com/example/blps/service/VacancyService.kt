@@ -5,6 +5,7 @@ import com.example.blps.dto.VacancyDto
 import com.example.blps.model.*
 import com.example.blps.repository.VacancyRepository
 import org.springframework.scheduling.annotation.Scheduled
+import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.stereotype.Service
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.TransactionDefinition
@@ -25,15 +26,6 @@ class VacancyService(
         timeout = 30
     }
 
-    private val readOnlyTransactionTemplate = TransactionTemplate(transactionManager).apply {
-        propagationBehavior = TransactionDefinition.PROPAGATION_REQUIRED
-        isReadOnly = true
-    }
-
-    private val serializableTransactionTemplate = TransactionTemplate(transactionManager).apply {
-        isolationLevel = TransactionDefinition.ISOLATION_SERIALIZABLE
-    }
-
     private val batchTransactionTemplate = TransactionTemplate(transactionManager).apply {
         propagationBehavior = TransactionDefinition.PROPAGATION_REQUIRES_NEW
         timeout = 120
@@ -46,55 +38,15 @@ class VacancyService(
     }
 
     fun createVacancy(vacancy: Vacancy): Vacancy =
-        transactionTemplate.execute { _ ->
-            vacancyRepository.save(vacancy.apply {
-                status = VacancyStatus.DRAFT
-                createdAt = LocalDateTime.now()
-            })
-        }!!
+        vacancyRepository.save(vacancy.apply {
+            status = VacancyStatus.DRAFT
+            createdAt = LocalDateTime.now()
+        })
 
     fun getVacancyById(id: Long): Vacancy =
-        readOnlyTransactionTemplate.execute { _ ->
-            vacancyRepository.findById(id).orElseThrow {
-                RuntimeException("Vacancy not found with id: $id")
-            }
-        }!!
-
-//    fun prepareForPublishing(vacancyId: Long, publishRequest: PublishRequest): Vacancy =
-//        transactionTemplate.execute { _ ->
-//            val vacancy = getVacancyById(vacancyId).apply {
-//                publishTime = publishRequest.publishTime
-//                publicationType = publishRequest.publicationType
-//                publishOnZarplataRu = publishRequest.publishOnZarplataRu
-//                cities = publishRequest.cities
-//                status = VacancyStatus.PENDING_PAYMENT
-//            }
-//            vacancyRepository.save(vacancy)
-//        }!!
-//
-//    fun processPayment(vacancyId: Long, paymentMethod: PaymentMethod): Payment =
-//        serializableTransactionTemplate.execute { _ ->
-//            val vacancy = getVacancyById(vacancyId)
-//            require(vacancy.status == VacancyStatus.PENDING_PAYMENT) {
-//                "Vacancy is not in PENDING_PAYMENT status"
-//            }
-//
-//            val amount = calculateCost(vacancy)
-//            val payment = paymentService.createPayment(vacancyId, amount, paymentMethod)
-//
-//            if (paymentMethod == PaymentMethod.PERSONAL_ACCOUNT) {
-//                paymentGateway.processWithPersonalAccount(payment.id, amount)
-//            } else {
-//                paymentGateway.processWithBankCard(payment.id, amount)
-//            }
-//
-//            // Автоматическая публикация, если не указано отложенное время
-//            if (vacancy.publishTime == null || vacancy.publishTime!!.isBefore(LocalDateTime.now())) {
-//                publishVacancy(vacancy)
-//            }
-//
-//            payment
-//        }!!
+        vacancyRepository.findById(id).orElseThrow {
+            RuntimeException("Vacancy not found with id: $id")
+        }
 
     fun publishWithPayment(vacancyId: Long, req: PublishAndPayRequest): Vacancy {
         val paidVacancy = transactionTemplate.execute { _ ->
@@ -113,13 +65,15 @@ class VacancyService(
             }
 
             val price = calculateCost(vacancy)
-            val payment = paymentService.createPayment(
-                vacancyId, price, req.paymentMethod
-            )
+
+            val username = SecurityContextHolder.getContext().authentication.name
+            val payment = paymentService.createPayment(vacancyId, price, req.paymentMethod, username)
 
             val payOk = when (req.paymentMethod) {
                 PaymentMethod.BANK_CARD -> paymentGateway.processWithBankCard(payment.id, price)
-                PaymentMethod.PERSONAL_ACCOUNT -> paymentGateway.processWithPersonalAccount(payment.id, price)
+                PaymentMethod.PERSONAL_ACCOUNT -> {
+                    paymentGateway.processWithPersonalAccount(username, payment.id, price)
+                }
             }
 
             if (!payOk)
@@ -179,8 +133,7 @@ class VacancyService(
             vacancyRepository.save(vacancy)
 
             paymentService.getLastPaymentForVacancy(vacancyId)?.let {
-                if (it.status == PaymentStatus.COMPLETED)
-                    paymentGateway.refund(it.id)
+                if (it.status == PaymentStatus.COMPLETED) paymentGateway.refund(it.id)
             }
         }
     }
@@ -201,18 +154,16 @@ class VacancyService(
 
     @Scheduled(fixedRate = 60_000)
     fun publishScheduledVacancies() {
-        transactionTemplate.execute { _ ->
-            val now = LocalDateTime.now()
-            vacancyRepository.findByStatus(VacancyStatus.PAID)
-                .filter { it.publishTime != null && it.publishTime!!.isBefore(now) }
-                .forEach {
-                    try {
-                        publishPaidVacancy(it)
-                    } catch (ex: Exception) {
-                        rollbackAfterPublishFail(it.id)
-                    }
+        val now = LocalDateTime.now()
+        vacancyRepository.findByStatus(VacancyStatus.PAID)
+            .filter { it.publishTime != null && it.publishTime!!.isBefore(now) }
+            .forEach {
+                try {
+                    publishPaidVacancy(it)
+                } catch (ex: Exception) {
+                    rollbackAfterPublishFail(it.id)
                 }
-        }
+            }
     }
 
 
@@ -228,28 +179,6 @@ class VacancyService(
                 }
         }
     }
-
-//    fun publishVacancy(vacancy: Vacancy): Vacancy =
-//        transactionTemplate.execute { _ ->
-//            require(vacancy.status == VacancyStatus.PENDING_PAYMENT) {
-//                "Cannot publish vacancy with status ${vacancy.status}"
-//            }
-//
-//            val actualPublishTime = vacancy.publishTime ?: LocalDateTime.now()
-//
-//            vacancy.apply {
-//                publishedAt = actualPublishTime
-//                expiresAt = calculateExpirationDate(actualPublishTime)
-//                status = VacancyStatus.PUBLISHED
-//                promotionScore = calculateInitialPromotionScore(vacancy)
-//                lastPromotionUpdate = actualPublishTime
-//
-//                if (publishOnZarplataRu) {
-//                    zarplataRuService.publishVacancy(this)
-//                }
-//            }.let { vacancyRepository.save(it) }
-//        }!!
-
 
     private fun calculateInitialPromotionScore(vacancy: Vacancy): Double {
         return when (vacancy.publicationType) {
@@ -324,16 +253,12 @@ class VacancyService(
     }
 
     fun getAllVacancies(): List<VacancyDto> =
-        readOnlyTransactionTemplate.execute { _ ->
-            vacancyRepository.findAllByOrderByPromotionScoreDesc()
-                .map { it.toDto() }
-        }!!
+        vacancyRepository.findAllByOrderByPromotionScoreDesc()
+            .map { it.toDto() }
 
     fun getPublishedVacancies(): List<VacancyDto> =
-        readOnlyTransactionTemplate.execute { _ ->
-            vacancyRepository.findByStatus(VacancyStatus.PUBLISHED)
-                .map { it.toDto() }
-        }!!
+        vacancyRepository.findByStatus(VacancyStatus.PUBLISHED)
+            .map { it.toDto() }
 }
 
 

@@ -34,34 +34,6 @@ class VacancyController(
         }
     }
 
-//    @PostMapping("/{id}/prepare-publish")
-//    @PreAuthorize("hasAuthority('VACANCY_PUBLISH')")
-//    fun prepareForPublishing(
-//        @PathVariable id: Long,
-//        @RequestBody publishRequest: PublishRequest
-//    ): Vacancy {
-//        return try {
-//            vacancyService.prepareForPublishing(id, publishRequest)
-//        } catch (ex: RuntimeException) {
-//            throw ResponseStatusException(HttpStatus.BAD_REQUEST, ex.message, ex)
-//        }
-//    }
-//
-//    @PostMapping("/{id}/process-payment")
-//    @PreAuthorize("hasAuthority('PAYMENT_PROCESS')")
-//    fun processPayment(
-//        @PathVariable id: Long,
-//        @RequestBody paymentRequest: PaymentRequest
-//    ): Payment {
-//        return try {
-//            vacancyService.processPayment(id, paymentRequest.paymentMethod)
-//        } catch (ex: RuntimeException) {
-//            throw ResponseStatusException(HttpStatus.BAD_REQUEST, ex.message, ex)
-//        } catch (ex: IllegalArgumentException) {
-//            throw ResponseStatusException(HttpStatus.BAD_REQUEST, ex.message, ex)
-//        }
-//    }
-
     @PostMapping("/{id}/publish")
     @PreAuthorize("hasAuthority('VACANCY_PUBLISH')")
     fun publish(
@@ -106,17 +78,6 @@ class VacancyController(
         }
     }
 }
-
-//data class PublishRequest(
-//    val publishTime: LocalDateTime? = null,
-//    val publicationType: PublicationType,
-//    val publishOnZarplataRu: Boolean,
-//    val cities: List<String>
-//)
-//
-//data class PaymentRequest(
-//    val paymentMethod: PaymentMethod
-//)
 
 data class PublishAndPayRequest(
     val publishTime: LocalDateTime? = null,

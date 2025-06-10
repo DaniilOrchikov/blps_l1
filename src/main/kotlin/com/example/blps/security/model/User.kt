@@ -21,5 +21,8 @@ data class User(
     val email: String = "",
 
     @XmlElement(name = "role")
-    val roles: MutableList<String> = mutableListOf()
+    val roles: MutableList<String> = mutableListOf(),
+
+    @XmlElement
+    var balance: Double = 0.0
 )

@@ -32,7 +32,7 @@ class SecurityConfig(
                     .requestMatchers("/api/auth/**").permitAll()
                     .requestMatchers("/api/vacancies").hasAuthority("VACANCY_VIEW_PUBLIC")
                     .requestMatchers("/api/vacancies/{id}").hasAuthority("VACANCY_VIEW_PUBLIC")
-                    .requestMatchers("/api/vacancies/admin/**").hasAuthority("VACANCY_VIEW_ALL")
+                    .requestMatchers("/api/vacancies/mine").hasAuthority("VACANCY_VIEW_MINE")
                     .requestMatchers(HttpMethod.POST, "/api/vacancies").hasAuthority("VACANCY_CREATE_EDIT")
                     .requestMatchers("/api/vacancies/{id}/prepare-publish").hasAuthority("VACANCY_PUBLISH")
                     .requestMatchers("/api/vacancies/{id}/process-payment").hasAuthority("PAYMENT_PROCESS")

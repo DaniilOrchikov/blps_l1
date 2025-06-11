@@ -5,4 +5,5 @@ import org.springframework.data.jpa.repository.JpaRepository
 
 interface PaymentRepository : JpaRepository<Payment, Long> {
     fun findTopByVacancyIdOrderByCreatedAtDesc(vacancyId: Long): Payment?
+    fun findByIdAndUsername(id: Long, username: String): Payment?
 }

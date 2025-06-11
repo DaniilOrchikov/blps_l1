@@ -16,7 +16,7 @@ class PaymentController(
     @PreAuthorize("hasAuthority('PAYMENT_PROCESS')")
     fun getPayment(@PathVariable id: Long): Payment {
         return try {
-            paymentService.getPaymentById(id)
+            paymentService.getPaymentOfUser(id)
         } catch (ex: RuntimeException) {
             throw ResponseStatusException(HttpStatus.NOT_FOUND, ex.message, ex)
         }

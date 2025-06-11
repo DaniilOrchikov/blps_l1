@@ -4,6 +4,7 @@ import com.example.blps.dto.VacancyDto
 import com.example.blps.model.*
 import com.example.blps.service.VacancyService
 import org.springframework.http.HttpStatus
+import org.springframework.security.access.prepost.PreAuthorize
 import org.springframework.web.bind.annotation.*
 import org.springframework.web.server.ResponseStatusException
 import java.time.LocalDateTime
@@ -14,6 +15,7 @@ class VacancyController(
     private val vacancyService: VacancyService
 ) {
     @PostMapping
+    @PreAuthorize("hasAuthority('VACANCY_CREATE_EDIT')")
     fun createVacancy(@RequestBody vacancy: Vacancy): Vacancy {
         return try {
             vacancyService.createVacancy(vacancy)
@@ -23,15 +25,17 @@ class VacancyController(
     }
 
     @GetMapping("/{id}")
+    @PreAuthorize("hasAuthority('VACANCY_VIEW_PUBLIC')")
     fun getVacancy(@PathVariable id: Long): Vacancy {
         return try {
-            vacancyService.getVacancyById(id)
+            vacancyService.getOwnVacancy(id)
         } catch (ex: RuntimeException) {
             throw ResponseStatusException(HttpStatus.NOT_FOUND, ex.message, ex)
         }
     }
 
     @PostMapping("/{id}/publish")
+    @PreAuthorize("hasAuthority('VACANCY_PUBLISH')")
     fun publish(
         @PathVariable id: Long,
         @RequestBody req: PublishAndPayRequest
@@ -43,6 +47,7 @@ class VacancyController(
         }
 
     @GetMapping("/{id}/calculate-cost")
+    @PreAuthorize("hasAuthority('VACANCY_VIEW_PUBLIC')")
     fun calculateCost(@PathVariable id: Long): CostResponse {
         return try {
             val vacancy = vacancyService.getVacancyById(id)
@@ -54,6 +59,7 @@ class VacancyController(
     }
 
     @GetMapping
+    @PreAuthorize("hasAuthority('VACANCY_VIEW_PUBLIC')")
     fun getPublishedVacancies(): List<VacancyDto> {
         return try {
             vacancyService.getPublishedVacancies()
@@ -62,10 +68,11 @@ class VacancyController(
         }
     }
 
-    @GetMapping("/all")
-    fun getAllVacancies(): List<VacancyDto> {
+    @GetMapping("/mine")
+    @PreAuthorize("hasAuthority('VACANCY_VIEW_MINE')")
+    fun getMineVacancies(): List<VacancyDto> {
         return try {
-            vacancyService.getAllVacancies()
+            vacancyService.getAllMyVacancies()
         } catch (ex: RuntimeException) {
             throw ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to retrieve all vacancies", ex)
         }

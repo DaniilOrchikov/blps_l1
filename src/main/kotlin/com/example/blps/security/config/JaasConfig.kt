@@ -71,7 +71,7 @@ class JaasConfig(
                     "HR_MANAGER" -> {
                         authorities.add("VACANCY_CREATE_EDIT")
                         authorities.add("VACANCY_PUBLISH")
-                        authorities.add("VACANCY_VIEW_ALL")
+                        authorities.add("VACANCY_VIEW_MINE")
                         authorities.add("VACANCY_VIEW_PUBLIC")
                         authorities.add("PAYMENT_PROCESS")
                         authorities.add("ACCOUNT_INTERACTION")

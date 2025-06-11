@@ -3,12 +3,14 @@ package com.example.blps.controller
 import com.example.blps.service.PaymentGateway
 import com.example.blps.service.PersonalAccountService
 import org.springframework.http.HttpStatus
+import org.springframework.security.access.prepost.PreAuthorize
 import org.springframework.web.bind.annotation.*
 import org.springframework.web.server.ResponseStatusException
 import org.springframework.security.core.context.SecurityContextHolder
 
 @RestController
 @RequestMapping("/api/account")
+@PreAuthorize("hasAuthority('ACCOUNT_INTERACTION')")
 class AccountController(
     private val accountService: PersonalAccountService,
     private val paymentGateway: PaymentGateway

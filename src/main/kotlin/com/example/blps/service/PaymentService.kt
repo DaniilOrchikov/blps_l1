@@ -4,11 +4,15 @@ import com.example.blps.model.Payment
 import com.example.blps.model.PaymentMethod
 import com.example.blps.model.PaymentStatus
 import com.example.blps.repository.PaymentRepository
+import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.stereotype.Service
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.TransactionDefinition
 import org.springframework.transaction.support.TransactionTemplate
 import java.time.LocalDateTime
+
+class AccessDeniedForPaymentException(msg: String) : RuntimeException(msg)
+
 
 @Service
 class PaymentService(
@@ -50,4 +54,10 @@ class PaymentService(
             paymentRepository.save(payment)
         }
     }
+
+    fun getPaymentOfUser(paymentId: Long): Payment =
+        paymentRepository.findByIdAndUsername(paymentId, SecurityContextHolder.getContext().authentication.name)
+            ?: throw AccessDeniedForPaymentException(
+                "Payment $paymentId not found or not yours"
+            )
 }

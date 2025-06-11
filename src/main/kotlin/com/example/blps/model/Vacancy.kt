@@ -63,7 +63,9 @@ data class Vacancy(
     var expiresAt: LocalDateTime? = null,
 
     var promotionScore: Double = 0.0,
-    var lastPromotionUpdate: LocalDateTime? = null
+    var lastPromotionUpdate: LocalDateTime? = null,
+
+    var createdBy: String = ""
 )
 
 enum class EmploymentType {

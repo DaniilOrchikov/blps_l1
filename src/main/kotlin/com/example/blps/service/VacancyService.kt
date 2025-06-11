@@ -13,6 +13,8 @@ import org.springframework.transaction.support.TransactionTemplate
 import java.time.LocalDateTime
 import java.time.temporal.ChronoUnit
 
+class AccessDeniedForVacancyException(msg: String) : RuntimeException(msg)
+
 @Service
 class VacancyService(
     private val vacancyRepository: VacancyRepository,
@@ -37,21 +39,33 @@ class VacancyService(
         private const val DAILY_SCORE_DECREASE = 5.0
     }
 
-    fun createVacancy(vacancy: Vacancy): Vacancy =
-        vacancyRepository.save(vacancy.apply {
+    fun createVacancy(vacancy: Vacancy): Vacancy {
+        val username = SecurityContextHolder.getContext().authentication.name
+        return vacancyRepository.save(vacancy.apply {
             status = VacancyStatus.DRAFT
             createdAt = LocalDateTime.now()
+            createdBy = username
         })
+    }
 
     fun getVacancyById(id: Long): Vacancy =
         vacancyRepository.findById(id).orElseThrow {
             RuntimeException("Vacancy not found with id: $id")
         }
 
-    fun publishWithPayment(vacancyId: Long, req: PublishAndPayRequest): Vacancy {
-        val paidVacancy = transactionTemplate.execute { _ ->
+    fun getOwnVacancy(id: Long): Vacancy {
+        val username = SecurityContextHolder.getContext().authentication.name
+        return vacancyRepository.findByIdAndCreatedBy(id, username)
+            .orElseThrow {
+                AccessDeniedForVacancyException("Vacancy $id not found or not yours")
+            }
+    }
 
-            val vacancy = getVacancyById(vacancyId)
+    fun publishWithPayment(vacancyId: Long, req: PublishAndPayRequest): Vacancy {
+        val username = SecurityContextHolder.getContext().authentication.name
+        val paidVacancy = transactionTemplate.execute { _ ->
+            val vacancy = getOwnVacancy(vacancyId)
+
             require(vacancy.status == VacancyStatus.DRAFT) {
                 "Vacancy must be in DRAFT status"
             }
@@ -66,7 +80,6 @@ class VacancyService(
 
             val price = calculateCost(vacancy)
 
-            val username = SecurityContextHolder.getContext().authentication.name
             val payment = paymentService.createPayment(vacancyId, price, req.paymentMethod, username)
 
             val payOk = when (req.paymentMethod) {
@@ -258,6 +271,10 @@ class VacancyService(
 
     fun getPublishedVacancies(): List<VacancyDto> =
         vacancyRepository.findByStatus(VacancyStatus.PUBLISHED)
+            .map { it.toDto() }
+
+    fun getAllMyVacancies(): List<VacancyDto> =
+        vacancyRepository.findByCreatedByOrderByPromotionScoreDesc(SecurityContextHolder.getContext().authentication.name)
             .map { it.toDto() }
 }
 

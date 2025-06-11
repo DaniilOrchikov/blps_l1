@@ -30,7 +30,7 @@ class PaymentGateway(
             true
         } catch (ex: InsufficientFundsException) {
             paymentService.updatePaymentStatus(paymentId, PaymentStatus.FAILED)
-            false
+            throw ex
         }
     }
 

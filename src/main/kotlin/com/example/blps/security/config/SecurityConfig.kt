@@ -37,6 +37,7 @@ class SecurityConfig(
                     .requestMatchers("/api/vacancies/{id}/prepare-publish").hasAuthority("VACANCY_PUBLISH")
                     .requestMatchers("/api/vacancies/{id}/process-payment").hasAuthority("PAYMENT_PROCESS")
                     .requestMatchers("/api/payments/**").hasAuthority("PAYMENT_PROCESS")
+                    .requestMatchers("/api/account/**").hasAuthority("ACCOUNT_INTERACTION")
                     .anyRequest().authenticated()
             }
             .httpBasic { }

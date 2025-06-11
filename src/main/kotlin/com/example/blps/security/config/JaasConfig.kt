@@ -74,9 +74,11 @@ class JaasConfig(
                         authorities.add("VACANCY_VIEW_ALL")
                         authorities.add("VACANCY_VIEW_PUBLIC")
                         authorities.add("PAYMENT_PROCESS")
+                        authorities.add("ACCOUNT_INTERACTION")
                     }
                     "CANDIDATE" -> {
                         authorities.add("VACANCY_VIEW_PUBLIC")
+                        authorities.add("ACCOUNT_INTERACTION")
                     }
                 }
 
